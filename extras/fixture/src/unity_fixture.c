@@ -170,7 +170,7 @@ typedef struct GuardBytes
     size_t size;
     size_t guard_space;
 #ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
-    size_t frames;
+    int frames;
     char **stack;
     const char *file;
     int line;
@@ -192,9 +192,9 @@ void UnityMalloc_EndTest(void)
 #ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
         fprintf(stderr, "%d mallocs not free()d\n", malloc_count);
         for (Guard *g = guard_first; g; g = g->next) {
-            fprintf(stderr, "ALLOC(%lld from %s:%d)\n", g->size, g->file, g->line);
-            for (size_t i = 0; i < g->frames; i++) {
-                fprintf(stderr, "     %d - %s\n", (int)i, g->stack[i]);
+            fprintf(stderr, "ALLOC(%zu from %s:%d)\n", g->size, g->file, g->line);
+            for (int i = 0; i < g->frames; i++) {
+                fprintf(stderr, "     %d - %s\n", i, g->stack[i]);
             }
         }
 #endif
@@ -240,7 +240,7 @@ void* unity_malloc(size_t size)
     pthread_t self = pthread_self();
     if (thread) {
         if (thread != self) {
-            fprintf(stderr, "DIFFERENT THREAD ALLOC %d != %d\n", self, thread);
+            fprintf(stderr, "DIFFERENT THREAD ALLOC %d != %d\n", (int)self, (int)thread);
             exit(1);
         }
     } else {

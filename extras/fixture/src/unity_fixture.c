@@ -5,9 +5,19 @@
  *  [Released under MIT License. Please refer to license.txt for details]
  * ========================================== */
 
+#ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
+#include <pthread.h>
+#endif
+
 #include "unity_fixture.h"
 #include "unity_internals.h"
 #include <string.h>
+
+#ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
+#include <stdio.h>
+#include <stdlib.h>
+#include <execinfo.h>
+#endif
 
 struct UNITY_FIXTURE_T UnityFixture;
 
@@ -155,11 +165,39 @@ void UnityMalloc_StartTest(void)
     malloc_fail_countdown = MALLOC_DONT_FAIL;
 }
 
+typedef struct GuardBytes
+{
+    size_t size;
+    size_t guard_space;
+#ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
+    size_t frames;
+    char **stack;
+    const char *file;
+    int line;
+    struct GuardBytes *next;
+    struct GuardBytes *prev;
+#endif
+} Guard;
+
+#ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
+static Guard *guard_first = NULL;
+static Guard *guard_last = NULL;
+#endif
+
 void UnityMalloc_EndTest(void)
 {
     malloc_fail_countdown = MALLOC_DONT_FAIL;
     if (malloc_count != 0)
     {
+#ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
+        fprintf(stderr, "%d mallocs not free()d\n", malloc_count);
+        for (Guard *g = guard_first; g; g = g->next) {
+            fprintf(stderr, "ALLOC(%lld from %s:%d)\n", g->size, g->file, g->line);
+            for (size_t i = 0; i < g->frames; i++) {
+                fprintf(stderr, "     %d - %s\n", (int)i, g->stack[i]);
+            }
+        }
+#endif
         UNITY_TEST_FAIL(Unity.CurrentTestLineNumber, "This test leaks!");
     }
 }
@@ -183,20 +221,32 @@ static size_t heap_index;
 #include <stdlib.h>
 #endif
 
-typedef struct GuardBytes
-{
-    size_t size;
-    size_t guard_space;
-} Guard;
-
 
 static const char end[] = "END";
 
+#ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
+void* unity_malloc(const char *file, int line, size_t size)
+#else
 void* unity_malloc(size_t size)
+#endif
 {
     char* mem;
     Guard* guard;
     size_t total_size = size + sizeof(Guard) + sizeof(end);
+ 
+ #ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
+   static pthread_t thread = 0;
+
+    pthread_t self = pthread_self();
+    if (thread) {
+        if (thread != self) {
+            fprintf(stderr, "DIFFERENT THREAD ALLOC %d != %d\n", self, thread);
+            exit(1);
+        }
+    } else {
+        thread = self;
+    }
+#endif
 
     if (malloc_fail_countdown != MALLOC_DONT_FAIL)
     {
@@ -223,6 +273,26 @@ void* unity_malloc(size_t size)
     malloc_count++;
     guard->size = size;
     guard->guard_space = 0;
+
+#ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
+    if (guard_first) {
+        guard_last->next = guard;
+        guard->next = NULL;
+
+        guard->prev = guard_last;
+        guard_last = guard;
+    } else {
+        guard_first = guard_last = guard;
+        guard->next = guard->prev = NULL;
+    }
+    guard->file = file;
+    guard->line = line;
+
+    void *bt[100];
+    guard->frames = backtrace(bt, 100);
+    guard->stack = backtrace_symbols(bt, guard->frames);
+#endif
+
     mem = (char*)&(guard[1]);
     memcpy(&mem[size], end, sizeof(end));
 
@@ -244,6 +314,27 @@ static void release_memory(void* mem)
     guard--;
 
     malloc_count--;
+
+#ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
+    Guard *next = guard->next;
+    Guard *prev = guard->prev;
+
+    if (prev) {
+        prev->next = next;
+    } else {
+        guard_first = next;
+    }
+
+    if (next) {
+        next->prev = prev;
+    } else {
+        guard_last = prev;
+    }
+
+    free(guard->stack);
+    guard->stack = NULL;
+#endif
+
 #ifdef UNITY_EXCLUDE_STDLIB_MALLOC
     if (mem == unity_heap + heap_index - guard->size - sizeof(end))
     {
@@ -271,20 +362,32 @@ void unity_free(void* mem)
     }
 }
 
+#ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
+void* unity_calloc(const char *file, int line, size_t num, size_t size)
+#else
 void* unity_calloc(size_t num, size_t size)
+#endif
 {
-    void* mem = unity_malloc(num * size);
+    void* mem = unity_malloc(file, line, num * size);
     if (mem == NULL) return NULL;
     memset(mem, 0, num * size);
     return mem;
 }
 
+#ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
+void* unity_realloc(const char *file, int line, void* oldMem, size_t size)
+#else
 void* unity_realloc(void* oldMem, size_t size)
+#endif
 {
     Guard* guard = (Guard*)oldMem;
     void* newMem;
 
+#ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
+    if (oldMem == NULL) return unity_malloc(file, line, size);
+#else
     if (oldMem == NULL) return unity_malloc(size);
+#endif
 
     guard--;
     if (isOverrun(oldMem))
@@ -306,10 +409,19 @@ void* unity_realloc(void* oldMem, size_t size)
         heap_index + size - guard->size <= UNITY_INTERNAL_HEAP_SIZE_BYTES)
     {
         release_memory(oldMem);    /* Not thread-safe, like unity_heap generally */
+#ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
+        return unity_malloc(file, line, size); /* No memcpy since data is in place */
+#else
         return unity_malloc(size); /* No memcpy since data is in place */
+#endif
     }
 #endif
+#ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
+    newMem = unity_malloc(file, line, size);
+#else
     newMem = unity_malloc(size);
+#endif
+
     if (newMem == NULL) return NULL; /* Do not release old memory */
     memcpy(newMem, oldMem, guard->size);
     release_memory(oldMem);

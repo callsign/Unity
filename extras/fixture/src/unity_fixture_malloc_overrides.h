@@ -34,6 +34,16 @@
     extern void UNITY_FIXTURE_FREE(void* ptr);
 #endif
 
+#ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
+#define malloc(n)     unity_malloc(__FILE__, __LINE__, n)
+#define calloc(n, m)  unity_calloc(__FILE__, __LINE__, n, m)
+#define realloc(o, n) unity_realloc(__FILE__, __LINE__, o, n)
+#define free(n)       unity_free(n)
+
+void* unity_malloc(const char *file, int line, size_t size);
+void* unity_calloc(const char *file, int line, size_t num, size_t size);
+void* unity_realloc(const char *file, int line, void * oldMem, size_t size);
+#else
 #define malloc  unity_malloc
 #define calloc  unity_calloc
 #define realloc unity_realloc
@@ -42,6 +52,8 @@
 void* unity_malloc(size_t size);
 void* unity_calloc(size_t num, size_t size);
 void* unity_realloc(void * oldMem, size_t size);
+#endif
+
 void unity_free(void * mem);
 
 #endif /* UNITY_FIXTURE_MALLOC_OVERRIDES_H_ */

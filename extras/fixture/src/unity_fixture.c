@@ -7,6 +7,8 @@
 
 #ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
 #include <pthread.h>
+
+static pthread_mutex_t guard_lock = PTHREAD_MUTEX_INITIALIZER;
 #endif
 
 #include "unity_fixture.h"
@@ -156,6 +158,7 @@ void UnityIgnoreTest(const char* printableName, const char* group, const char* n
 /*------------------------------------------------- */
 /* Malloc and free stuff */
 #define MALLOC_DONT_FAIL -1
+
 static int malloc_count;
 static int malloc_fail_countdown = MALLOC_DONT_FAIL;
 
@@ -190,6 +193,7 @@ void UnityMalloc_EndTest(void)
     if (malloc_count != 0)
     {
 #ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
+        pthread_mutex_lock(&guard_lock);
         fprintf(stderr, "%d mallocs not free()d\n", malloc_count);
         for (Guard *g = guard_first; g; g = g->next) {
             fprintf(stderr, "ALLOC(%zu from %s:%d)\n", g->size, g->file, g->line);
@@ -197,6 +201,7 @@ void UnityMalloc_EndTest(void)
                 fprintf(stderr, "     %d - %s\n", i, g->stack[i]);
             }
         }
+        pthread_mutex_unlock(&guard_lock);
 #endif
         UNITY_TEST_FAIL(Unity.CurrentTestLineNumber, "This test leaks!");
     }
@@ -234,20 +239,6 @@ void* unity_malloc(size_t size)
     Guard* guard;
     size_t total_size = size + sizeof(Guard) + sizeof(end);
  
- #ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
-   static pthread_t thread = 0;
-
-    pthread_t self = pthread_self();
-    if (thread) {
-        if (thread != self) {
-            fprintf(stderr, "DIFFERENT THREAD ALLOC %d != %d\n", (int)self, (int)thread);
-            exit(1);
-        }
-    } else {
-        thread = self;
-    }
-#endif
-
     if (malloc_fail_countdown != MALLOC_DONT_FAIL)
     {
         if (malloc_fail_countdown == 0)
@@ -275,16 +266,24 @@ void* unity_malloc(size_t size)
     guard->guard_space = 0;
 
 #ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
-    if (guard_first) {
+    pthread_mutex_lock(&guard_lock);
+
+    if (guard_first)
+    {
         guard_last->next = guard;
         guard->next = NULL;
 
         guard->prev = guard_last;
         guard_last = guard;
-    } else {
+    }
+    else
+    {
         guard_first = guard_last = guard;
         guard->next = guard->prev = NULL;
     }
+
+    pthread_mutex_unlock(&guard_lock);
+
     guard->file = file;
     guard->line = line;
 
@@ -316,23 +315,33 @@ static void release_memory(void* mem)
     malloc_count--;
 
 #ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
+    pthread_mutex_lock(&guard_lock);
+
     Guard *next = guard->next;
     Guard *prev = guard->prev;
 
-    if (prev) {
+    if (prev)
+    {
         prev->next = next;
-    } else {
+    }
+    else
+    {
         guard_first = next;
     }
 
-    if (next) {
+    if (next)
+    {
         next->prev = prev;
-    } else {
+    }
+    else
+    {
         guard_last = prev;
     }
 
     free(guard->stack);
     guard->stack = NULL;
+
+    pthread_mutex_unlock(&guard_lock);
 #endif
 
 #ifdef UNITY_EXCLUDE_STDLIB_MALLOC

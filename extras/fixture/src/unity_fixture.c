@@ -372,12 +372,14 @@ void unity_free(void* mem)
 }
 
 #ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
+#define UNITY_MALLOC_TRACK_PARAMS file, line, 
 void* unity_calloc(const char *file, int line, size_t num, size_t size)
 #else
+#define UNITY_MALLOC_TRACK_PARAMS 
 void* unity_calloc(size_t num, size_t size)
 #endif
 {
-    void* mem = unity_malloc(file, line, num * size);
+    void* mem = unity_malloc(UNITY_MALLOC_TRACK_PARAMS num * size);
     if (mem == NULL) return NULL;
     memset(mem, 0, num * size);
     return mem;
@@ -392,11 +394,7 @@ void* unity_realloc(void* oldMem, size_t size)
     Guard* guard = (Guard*)oldMem;
     void* newMem;
 
-#ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
-    if (oldMem == NULL) return unity_malloc(file, line, size);
-#else
-    if (oldMem == NULL) return unity_malloc(size);
-#endif
+    if (oldMem == NULL) return unity_malloc(UNITY_MALLOC_TRACK_PARAMS size);
 
     guard--;
     if (isOverrun(oldMem))
@@ -418,18 +416,10 @@ void* unity_realloc(void* oldMem, size_t size)
         heap_index + size - guard->size <= UNITY_INTERNAL_HEAP_SIZE_BYTES)
     {
         release_memory(oldMem);    /* Not thread-safe, like unity_heap generally */
-#ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
-        return unity_malloc(file, line, size); /* No memcpy since data is in place */
-#else
-        return unity_malloc(size); /* No memcpy since data is in place */
-#endif
+        return unity_malloc(UNITY_MALLOC_TRACK_PARAMS size); /* No memcpy since data is in place */
     }
 #endif
-#ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
-    newMem = unity_malloc(file, line, size);
-#else
-    newMem = unity_malloc(size);
-#endif
+    newMem = unity_malloc(UNITY_MALLOC_TRACK_PARAMS size);
 
     if (newMem == NULL) return NULL; /* Do not release old memory */
     memcpy(newMem, oldMem, guard->size);

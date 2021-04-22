@@ -190,10 +190,13 @@ static Guard *guard_last = NULL;
 void UnityMalloc_EndTest(void)
 {
     malloc_fail_countdown = MALLOC_DONT_FAIL;
+
+#ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
+    pthread_mutex_lock(&guard_lock);
+#endif
     if (malloc_count != 0)
     {
 #ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
-        pthread_mutex_lock(&guard_lock);
         fprintf(stderr, "%d mallocs not free()d\n", malloc_count);
         for (Guard *g = guard_first; g; g = g->next) {
             fprintf(stderr, "ALLOC(%zu from %s:%d)\n", g->size, g->file, g->line);
@@ -201,10 +204,12 @@ void UnityMalloc_EndTest(void)
                 fprintf(stderr, "     %d - %s\n", i, g->stack[i]);
             }
         }
-        pthread_mutex_unlock(&guard_lock);
 #endif
         UNITY_TEST_FAIL(Unity.CurrentTestLineNumber, "This test leaks!");
     }
+#ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
+    pthread_mutex_unlock(&guard_lock);
+#endif
 }
 
 void UnityMalloc_MakeMallocFailAfterCount(int countdown)
@@ -261,12 +266,13 @@ void* unity_malloc(size_t size)
     guard = (Guard*)UNITY_FIXTURE_MALLOC(total_size);
 #endif
     if (guard == NULL) return NULL;
-    malloc_count++;
     guard->size = size;
     guard->guard_space = 0;
 
 #ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
     pthread_mutex_lock(&guard_lock);
+
+    malloc_count++;
 
     if (guard_first)
     {
@@ -290,6 +296,8 @@ void* unity_malloc(size_t size)
     void *bt[100];
     guard->frames = backtrace(bt, 100);
     guard->stack = backtrace_symbols(bt, guard->frames);
+#else
+    malloc_count++;
 #endif
 
     mem = (char*)&(guard[1]);
@@ -312,10 +320,10 @@ static void release_memory(void* mem)
     Guard* guard = (Guard*)mem;
     guard--;
 
-    malloc_count--;
-
 #ifdef UNITY_FIXTURE_TRACK_ALLOCATIONS
     pthread_mutex_lock(&guard_lock);
+
+    malloc_count--;
 
     Guard *next = guard->next;
     Guard *prev = guard->prev;
@@ -342,6 +350,8 @@ static void release_memory(void* mem)
     guard->stack = NULL;
 
     pthread_mutex_unlock(&guard_lock);
+#else
+    malloc_count--;
 #endif
 
 #ifdef UNITY_EXCLUDE_STDLIB_MALLOC

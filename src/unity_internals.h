@@ -203,7 +203,7 @@ typedef UNITY_FLOAT_TYPE UNITY_FLOAT;
 #define isinf(n) (isnan((n) - (n)) && !isnan(n))
 #endif
 
-#ifndef isnan
+#if !defined isnan && !defined __cplusplus
 /* NaN is the only floating point value that does NOT equal itself.
  * Therefore if n != n, then it is NaN. */
 #define isnan(n) ((n != n) ? 1 : 0)

@@ -197,6 +197,7 @@
 #endif
 typedef UNITY_FLOAT_TYPE UNITY_FLOAT;
 
+#ifndef __cplusplus
 /* isinf & isnan macros should be provided by math.h */
 #ifndef isinf
 /* The value of Inf - Inf is NaN */
@@ -208,6 +209,8 @@ typedef UNITY_FLOAT_TYPE UNITY_FLOAT;
  * Therefore if n != n, then it is NaN. */
 #define isnan(n) ((n != n) ? 1 : 0)
 #endif
+
+#endif // cplusplus
 
 #endif
 
